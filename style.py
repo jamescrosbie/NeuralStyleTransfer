@@ -11,11 +11,11 @@ from tensorflow.keras.applications.vgg16 import preprocess_input
 
 # constants
 LR = 10
-STYLE_LAYERS = [3, 6, 10]
+STYLE_LAYERS = [3, 6, 9]
 THRESHOLD = 50
 EPOCHS = 5000
 
-STYLE_IMAGE_PATH = "./style.jpg"
+STYLE_IMAGE_PATH = "./starrynight.jpg"
 
 
 def read_image(path):
@@ -46,11 +46,11 @@ def calc_style_loss(x1, x2):
         x = x1[k]
         x = x[0, :, :, :]
         m1 = tf.reshape(x,
-                        shape=(tf.shape(x)[0] * tf.shape(x)[1], tf.shape(x)[2]))
+                        shape=(tf.shape(x)[2], tf.shape(x)[0] * tf.shape(x)[1]))
         y = x2[k]
         y = y[0, :, :, :]
         m2 = tf.reshape(y,
-                        shape=(tf.shape(y)[0] * tf.shape(y)[1], tf.shape(y)[2]))
+                        shape=(tf.shape(y)[2], tf.shape(y)[0] * tf.shape(y)[1]))
 
         gram1 = tf.linalg.matmul(m1, tf.transpose(m1))
         gram2 = tf.linalg.matmul(m2, tf.transpose(m2))
@@ -112,7 +112,7 @@ if __name__ == "__main__":
         opt.apply_gradients(zip(grad, [target]))
 
         # rule - stopping
-        if (i > 1) and ((losses[i-1] - losses[i] < 0.5) or (loss_value < THRESHOLD)):
+        if i > 1 and loss_value < THRESHOLD:
             break
 
         # rule - reporting
