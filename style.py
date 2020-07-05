@@ -10,8 +10,8 @@ from tensorflow.keras.applications.vgg16 import VGG16
 from tensorflow.keras.applications.vgg16 import preprocess_input
 
 # constants
-LR = 10
-STYLE_LAYERS = [3, 6, 9]
+LR = 1.0e-2
+STYLE_LAYERS = [1, 2, 11, 12]
 THRESHOLD = 50
 EPOCHS = 5000
 
@@ -44,18 +44,22 @@ def calc_style_loss(x1, x2):
     losses = []
     for k, _ in enumerate(x1):
         x = x1[k]
-        x = x[0, :, :, :]
+        x = x[0, :, :, :] if len(x1) > 1 else x[:, :, :]
         m1 = tf.reshape(x,
                         shape=(tf.shape(x)[2], tf.shape(x)[0] * tf.shape(x)[1]))
         y = x2[k]
-        y = y[0, :, :, :]
+        y = y[0, :, :, :] if len(x1) > 1 else y[:, :, :]
         m2 = tf.reshape(y,
                         shape=(tf.shape(y)[2], tf.shape(y)[0] * tf.shape(y)[1]))
 
         gram1 = tf.linalg.matmul(m1, tf.transpose(m1))
         gram2 = tf.linalg.matmul(m2, tf.transpose(m2))
 
-        losses.append(loss(gram1, gram2))
+        normalizer = 2 * tf.shape(y)[0] * tf.shape(y)[1] * tf.shape(y)[2]
+        normalizer = tf.cast(normalizer, tf.float32)
+
+        layer_loss = loss(gram1, gram2) / (normalizer ** 2)
+        losses.append(layer_loss)
 
     total_loss = tf.reduce_sum(losses)
 
@@ -69,7 +73,7 @@ def loss(y, y_hat):
 if __name__ == "__main__":
     print(f"Runing TensorFlow version {tf.__version__}")
 
-    #read in images
+    # read in images
     x = read_image(STYLE_IMAGE_PATH)
     cv2.imshow("Style Image", cv2.imread(STYLE_IMAGE_PATH))
 
@@ -87,8 +91,11 @@ if __name__ == "__main__":
     vgg = VGG16(input_shape=(x.shape[1], x.shape[2], 3),
                 weights='imagenet', include_top=False)
     print(vgg.summary())
+
+    names = [vgg.layers[l].name for l in STYLE_LAYERS]
+    print(f"Style layers : {names}")
     style_model = models.Model(inputs=vgg.inputs,
-                               outputs=[vgg.layers[l].output for l in STYLE_LAYERS])
+                               outputs=[vgg.get_layer(name).output for name in names])
 
     # Training loop
     losses = []
@@ -119,7 +126,7 @@ if __name__ == "__main__":
         if i % 100 == 0:
             print(f"Iteration {i}\tLoss {loss_value.numpy()}")
 
-        # rue - update learning rate
+        # rule - update learning rate
         if i > 0 and i % 1000 == 0:
             LR /= 10
             print(f"Learning Rate reduced to {LR}")
