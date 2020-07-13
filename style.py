@@ -10,12 +10,12 @@ from tensorflow.keras.applications.vgg16 import VGG16
 from tensorflow.keras.applications.vgg16 import preprocess_input
 
 # constants
-LR = 1.0e-2
-STYLE_LAYERS = [1, 2, 11, 12]
-THRESHOLD = 50
+LR = 10.0
+STYLE_LAYERS = [1, 4, 7, 11]
+STYLE_WEIGHTS = [0.25, 0.125, 0.125, 0.5]
+THRESHOLD = 0.0050
 EPOCHS = 5000
-
-STYLE_IMAGE_PATH = "./starrynight.jpg"
+STYLE_IMAGE_PATH = "./style.jpg"
 
 
 def read_image(path):
@@ -44,21 +44,25 @@ def calc_style_loss(x1, x2):
     losses = []
     for k, _ in enumerate(x1):
         x = x1[k]
-        x = x[0, :, :, :] if len(x1) > 1 else x[:, :, :]
+        x = tf.squeeze(x)
         m1 = tf.reshape(x,
                         shape=(tf.shape(x)[2], tf.shape(x)[0] * tf.shape(x)[1]))
+
         y = x2[k]
-        y = y[0, :, :, :] if len(x1) > 1 else y[:, :, :]
+        y = tf.squeeze(y)
         m2 = tf.reshape(y,
                         shape=(tf.shape(y)[2], tf.shape(y)[0] * tf.shape(y)[1]))
 
-        gram1 = tf.linalg.matmul(m1, tf.transpose(m1))
-        gram2 = tf.linalg.matmul(m2, tf.transpose(m2))
+        gram1 = tf.matmul(m1, tf.transpose(m1))
+        gram2 = tf.matmul(m2, tf.transpose(m2))
 
         normalizer = 2 * tf.shape(y)[0] * tf.shape(y)[1] * tf.shape(y)[2]
         normalizer = tf.cast(normalizer, tf.float32)
 
         layer_loss = loss(gram1, gram2) / (normalizer ** 2)
+
+        layer_loss = STYLE_WEIGHTS[k] * layer_loss
+
         losses.append(layer_loss)
 
     total_loss = tf.reduce_sum(losses)
@@ -71,7 +75,7 @@ def loss(y, y_hat):
 
 
 if __name__ == "__main__":
-    print(f"Runing TensorFlow version {tf.__version__}")
+    print(f"\n\nRunning TensorFlow version {tf.__version__}")
 
     # read in images
     x = read_image(STYLE_IMAGE_PATH)
@@ -90,6 +94,7 @@ if __name__ == "__main__":
     # load vgg16 and set layer
     vgg = VGG16(input_shape=(x.shape[1], x.shape[2], 3),
                 weights='imagenet', include_top=False)
+    vgg.trainable = False
     print(vgg.summary())
 
     names = [vgg.layers[l].name for l in STYLE_LAYERS]
@@ -97,19 +102,17 @@ if __name__ == "__main__":
     style_model = models.Model(inputs=vgg.inputs,
                                outputs=[vgg.get_layer(name).output for name in names])
 
+    # Define optimizer
+    opt = Adam(learning_rate=LR, decay=LR / EPOCHS)
+
     # Training loop
     losses = []
     grads = []
     print(f"Training on {EPOCHS} epochs")
     for i in range(EPOCHS):
-        # define the optimizer
-        opt = Adam(learning_rate=LR)
-
         # get content loss
         with tf.GradientTape() as tape:
-            a = style_model(x)
-            b = style_model(target)
-            loss_value = calc_style_loss(a, b)
+            loss_value = calc_style_loss(style_model(x), style_model(target))
 
         losses.append(loss_value)
 

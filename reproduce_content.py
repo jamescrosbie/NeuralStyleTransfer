@@ -49,10 +49,7 @@ if __name__ == "__main__":
     print(f"Runing TensorFlow version {tf.__version__}")
 
     #read in images
-    x = read_image(STYLE_IMAGE_PATH)
     y = read_image(CONTENT_IMAGE_PATH)
-
-    cv2.imshow("Style Image", cv2.imread(STYLE_IMAGE_PATH))
     cv2.imshow("Content Image", cv2.imread(CONTENT_IMAGE_PATH))
 
     # initialise image
@@ -76,8 +73,8 @@ if __name__ == "__main__":
     opt = Adam(lr=LR, decay=LR / EPOCHS)
 
     # Training loop
-    print(f"Training on {EPOCHS} epochs")
     losses = []
+    print(f"Training on {EPOCHS} epochs")
     for i in range(EPOCHS):
         # get content loss
         with tf.GradientTape() as tape:
