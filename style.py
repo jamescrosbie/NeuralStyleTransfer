@@ -6,133 +6,122 @@ import tensorflow as tf
 from tensorflow.keras import models
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.preprocessing import image
-from tensorflow.keras.applications.vgg16 import VGG16
-from tensorflow.keras.applications.vgg16 import preprocess_input
+from tensorflow.keras.applications.vgg19 import VGG19
+from tensorflow.keras.applications.vgg19 import preprocess_input
 
 # constants
-LR = 10.0
-STYLE_LAYERS = [1, 4, 7, 11]
-STYLE_WEIGHTS = [0.25, 0.125, 0.125, 0.5]
-THRESHOLD = 0.0050
-EPOCHS = 5000
-STYLE_IMAGE_PATH = "./style.jpg"
+IMAGE_SIZE = (224, 224)
+STYLE_LAYERS = [1, 4, 7, 12, 17]
+STYLE_WEIGHTS = [0.2, 0.2, 0.2, 0.2, 0.2]
+LR = 100
+EPOCHS = 100
+STYLE_IMAGE_PATH = "./Vassily_Kandinsky,_1913_-_Composition_7.jpg"
 
 
 def read_image(path):
-    img = image.load_img(path, target_size=None)
-    # convert style image to array and preprocess for vgg
-    x = image.img_to_array(img)
-    x = np.expand_dims(x, axis=0)
-    x = preprocess_input(x)
-    print(f"Shape of {path} image is {x.shape}")
-    return x
+    # read image and convert to tf tensor and resize
+    max_dim = 512
+    img = tf.io.read_file(path)
+    img = tf.image.decode_image(img, channels=3)
+    img = tf.image.convert_image_dtype(img, tf.float32)
+
+    shape = tf.cast(tf.shape(img)[:-1], tf.float32)
+    long_dim = max(shape)
+    scale = max_dim / long_dim
+
+    new_shape = tf.cast(shape * scale, tf.int32)
+
+    img = tf.image.resize(img, new_shape)
+    img = img[tf.newaxis, :]
+    return img
 
 
 def deprocess(x):
-    x -= x.mean()
-    x /= x.std() + 1e-05
-    x *= 0.1 * x
-
-    x += 0.5
-    x = np.clip(x, 0, 1)
     x *= 255
     x = np.clip(x, 0, 255).astype("uint8")
     return x
 
 
-def calc_style_loss(x1, x2):
-    losses = []
-    for k, _ in enumerate(x1):
-        x = x1[k]
-        x = tf.squeeze(x)
-        m1 = tf.reshape(x,
-                        shape=(tf.shape(x)[2], tf.shape(x)[0] * tf.shape(x)[1]))
-
-        y = x2[k]
-        y = tf.squeeze(y)
-        m2 = tf.reshape(y,
-                        shape=(tf.shape(y)[2], tf.shape(y)[0] * tf.shape(y)[1]))
-
-        gram1 = tf.matmul(m1, tf.transpose(m1))
-        gram2 = tf.matmul(m2, tf.transpose(m2))
-
-        normalizer = 2 * tf.shape(y)[0] * tf.shape(y)[1] * tf.shape(y)[2]
-        normalizer = tf.cast(normalizer, tf.float32)
-
-        layer_loss = loss(gram1, gram2) / (normalizer ** 2)
-
-        layer_loss = STYLE_WEIGHTS[k] * layer_loss
-
-        losses.append(layer_loss)
-
-    total_loss = tf.reduce_sum(losses)
-
-    return total_loss
+def gram_matrix(input_tensor):
+    result = tf.linalg.einsum('bijc,bijd->bcd', input_tensor, input_tensor)
+    input_shape = tf.shape(input_tensor)
+    normalizer = tf.cast(input_shape[1]*input_shape[2], tf.float32)
+    return result/(normalizer)
 
 
-def loss(y, y_hat):
-    return tf.reduce_mean(tf.math.squared_difference(y, y_hat))
+def calc_style_loss(target_outputs):
+    style_loss = tf.add_n([tf.reduce_mean((style_output[k] - target_output[k])**2) * STYLE_WEIGHTS[k]
+                           for k, v in enumerate(style_output)])
+    return style_loss
+
+
+def clip_0_1(image):
+    return tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=1.0)
 
 
 if __name__ == "__main__":
     print(f"\n\nRunning TensorFlow version {tf.__version__}")
 
     # read in images
-    x = read_image(STYLE_IMAGE_PATH)
-    cv2.imshow("Style Image", cv2.imread(STYLE_IMAGE_PATH))
+#    cv2.imshow("Style Image", cv2.imread(STYLE_IMAGE_PATH))
+    style_image = read_image(STYLE_IMAGE_PATH)
+#    style_image = preprocess_input(style_image*255.)
+    style_image = tf.image.resize(style_image, IMAGE_SIZE)
 
     # initialise image
-    target = np.random.random((x.shape[1], x.shape[2], 3))
-    cv2.imshow("Initialized Target", target)
-    target = np.expand_dims(target, axis=0)
-    target = preprocess_input(target)
-    print(f"Target image shape {target.shape}")
+    target = np.random.random((style_image.shape[1], style_image.shape[2], 3))
+#    cv2.imshow("Initialized Target", target)
+    target = tf.image.convert_image_dtype(target, tf.float32)
+    target = target[tf.newaxis, :]
+ #   target = preprocess_input(target*255.)
 
     # THIS IS SO IMPORTANT !!
     target = tf.Variable(tf.cast(target, tf.float32))
 
     # load vgg16 and set layer
-    vgg = VGG16(input_shape=(x.shape[1], x.shape[2], 3),
-                weights='imagenet', include_top=False)
+    vgg = VGG19(weights='imagenet', include_top=False)
     vgg.trainable = False
     print(vgg.summary())
 
     names = [vgg.layers[l].name for l in STYLE_LAYERS]
     print(f"Style layers : {names}")
-    style_model = models.Model(inputs=vgg.inputs,
+    style_model = models.Model(inputs=vgg.input,
                                outputs=[vgg.get_layer(name).output for name in names])
 
+    # To save computational time, since this is static calculate only once
+    style_outputs = style_model(style_image)
+    style_output = [gram_matrix(output) for output in style_outputs]
+
     # Define optimizer
-    opt = Adam(learning_rate=LR, decay=LR / EPOCHS)
+    opt = Adam(learning_rate=LR, beta_1=0.99, epsilon=1e-1)
 
     # Training loop
     losses = []
     grads = []
     print(f"Training on {EPOCHS} epochs")
-    for i in range(EPOCHS):
+    for i in range(1, EPOCHS):
         # get content loss
         with tf.GradientTape() as tape:
-            loss_value = calc_style_loss(style_model(x), style_model(target))
+            target_output = style_model(target)
+            target_output = [gram_matrix(output) for output in target_output]
+            loss_value = calc_style_loss(target_output)
 
-        losses.append(loss_value)
+        losses.append(loss_value.numpy())
 
         # calculate gradient and update target
         grad = tape.gradient(loss_value, [target])
         grads.append(grad)
         opt.apply_gradients(zip(grad, [target]))
-
-        # rule - stopping
-        if i > 1 and loss_value < THRESHOLD:
-            break
+        target.assign(clip_0_1(target))
 
         # rule - reporting
         if i % 100 == 0:
             print(f"Iteration {i}\tLoss {loss_value.numpy()}")
 
-        # rule - update learning rate
-        if i > 0 and i % 1000 == 0:
-            LR /= 10
-            print(f"Learning Rate reduced to {LR}")
+        if i % 1000 == 0:
+            LR = LR / 10
+            print(f"Learning Rate set to {LR}")
+            opt = Adam(learning_rate=LR, beta_1=0.99, epsilon=1e-1)
 
     # show finalised image
     target = tf.convert_to_tensor(target).numpy()
@@ -147,7 +136,7 @@ if __name__ == "__main__":
     plt.plot(range(len(losses)), losses, label="Losses from content")
     plt.title("Neural Style Transfer Loss")
     plt.ylim(0, np.max(losses)*1.1)
+    plt.savefig("./NST_style_loss.png")
     plt.show()
-    plt.savefig("./NST_content_loss_{HIDDEN_LAYER}.png")
 
     print("** Done **")
