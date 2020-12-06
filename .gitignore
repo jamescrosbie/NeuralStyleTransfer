@@ -1,4 +1,5 @@
 *.ipynb
 *.vscode
-ourhouse.jpg
-starrynight.jpg
+*.jpg
+*.png
+resize_image.py
